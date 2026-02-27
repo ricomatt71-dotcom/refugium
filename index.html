@@ -1,428 +1,381 @@
-<!DOCTYPE html>
-<html lang="de">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aetheris Master Control - v5.1 (High Visibility)</title>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=Fira+Code:wght@400;700&display=swap');
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  Plus, 
+  Book, 
+  Search, 
+  Copy, 
+  Trash2, 
+  Edit3, 
+  ChevronDown, 
+  ChevronUp, 
+  SeparatorHorizontal,
+  X,
+  CheckCircle2,
+  AlertCircle,
+  Archive
+} from 'lucide-react';
+
+const App = () => {
+  // --- State Management ---
+  const [view, setView] = useState('archive'); // Default to archive for overview
+  const [archiveMode, setArchiveMode] = useState('xposts'); // 'xposts' or 'resonance'
+  const [searchQuery, setSearchQuery] = useState('');
+  const [expandedId, setExpandedId] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  
+  // Local storage simulation for the demo
+  const [entries, setEntries] = useState([
+    { 
+      id: '1', 
+      title: 'Erster Vektor', 
+      content: 'Dies ist ein Beispiel-Post.\n--------------------\nMit einer Trennlinie.', 
+      tabNumber: '001', 
+      type: 'xposts', 
+      xStatus: 'sent' 
+    },
+    { 
+      id: '2', 
+      title: 'Resonanz Gedanken', 
+      content: 'Tiefe Reflexion über das Licht.', 
+      tabNumber: '001', 
+      type: 'resonance', 
+      xStatus: 'standby' 
+    }
+  ]);
+
+  const [formData, setFormData] = useState({
+    title: '',
+    content: '',
+    tabNumber: '',
+    type: 'xposts',
+    xStatus: 'standby'
+  });
+
+  // --- Logic ---
+  const handleSave = () => {
+    if (!formData.title || !formData.content) return;
+
+    let finalTabNumber = formData.tabNumber;
+    if (!finalTabNumber) {
+      const sameTypeEntries = entries.filter(e => e.type === formData.type);
+      finalTabNumber = (sameTypeEntries.length + 1).toString().padStart(3, '0');
+    }
+
+    if (editingId) {
+      setEntries(entries.map(e => e.id === editingId ? { ...formData, id: editingId, tabNumber: finalTabNumber } : e));
+      setEditingId(null);
+    } else {
+      const newEntry = {
+        ...formData,
+        id: Date.now().toString(),
+        tabNumber: finalTabNumber
+      };
+      setEntries([newEntry, ...entries]);
+    }
+
+    setFormData({ title: '', content: '', tabNumber: '', type: 'xposts', xStatus: 'standby' });
+    setView('archive');
+  };
+
+  const startEdit = (entry) => {
+    setFormData(entry);
+    setEditingId(entry.id);
+    setView('edit');
+  };
+
+  const deleteEntry = (id) => {
+    setEntries(entries.filter(e => e.id !== id));
+    if (expandedId === id) setExpandedId(null);
+  };
+
+  const addSeparator = () => {
+    setFormData(prev => ({
+      ...prev,
+      content: prev.content + "\n--------------------\n"
+    }));
+  };
+
+  const copyTOC = () => {
+    const list = entries
+      .filter(e => e.type === archiveMode)
+      .sort((a, b) => a.tabNumber.localeCompare(b.tabNumber))
+      .map(e => `[${e.tabNumber}] ${e.title} (${e.xStatus})`)
+      .join('\n');
+    navigator.clipboard.writeText(`ARCHE LOG - ${archiveMode.toUpperCase()}:\n${list}`);
+  };
+
+  const copyEntry = (e) => {
+    const text = `TITLE: ${e.title}\nTAB: ${e.tabNumber}\n\n${e.content}`;
+    navigator.clipboard.writeText(text);
+  };
+
+  const filteredEntries = entries
+    .filter(e => e.type === archiveMode)
+    .filter(e => 
+      e.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      e.tabNumber.includes(searchQuery)
+    )
+    .sort((a, b) => a.tabNumber.localeCompare(b.tabNumber));
+
+  // --- Components ---
+  const StatusDot = ({ status }) => {
+    if (status === 'sent') return <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]" />;
+    if (status === 'warning') return <div className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]" />;
+    return <div className="w-2 h-2 rounded-full bg-slate-600" />;
+  };
+
+  return (
+    <div className="min-h-screen bg-[#020617] text-slate-100 font-sans p-4 md:p-8 italic">
+      <div className="max-w-6xl mx-auto">
         
-        body { 
-            font-family: 'Inter', sans-serif; 
-            background-color: #020617; 
-            color: #f1f5f9; 
-            margin: 0; 
-            scroll-behavior: smooth;
-        }
+        {/* Header */}
+        <header className="flex flex-col md:flex-row justify-between items-center mb-10 gap-4">
+          <h1 className="text-4xl font-black tracking-tighter uppercase italic">
+            ARCHE <span className="text-orange-500">MASTER</span>
+          </h1>
+          
+          <nav className="flex bg-slate-900/50 border border-slate-800 p-1 rounded-2xl">
+            <button 
+              onClick={() => {setView('archive'); setEditingId(null);}}
+              className={`px-6 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${view === 'archive' ? 'bg-orange-600 text-white' : 'hover:text-orange-400'}`}
+            >
+              Archiv
+            </button>
+            <button 
+              onClick={() => {setView('create'); setEditingId(null); setFormData({title:'', content:'', tabNumber:'', type: archiveMode, xStatus:'standby'});}}
+              className={`px-6 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${view === 'create' ? 'bg-orange-600 text-white' : 'hover:text-orange-400'}`}
+            >
+              Neuaufnahme
+            </button>
+          </nav>
+        </header>
 
-        .glass { 
-            background: rgba(15, 23, 42, 0.98); 
-            backdrop-filter: blur(20px); 
-            border: 1px solid rgba(255,255,255,0.15); 
-        }
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          
+          {/* Left Sidebar: TOC */}
+          <aside className="lg:col-span-4 space-y-4">
+            <div className="bg-[#0f172a] border border-slate-800 rounded-[2rem] p-6 sticky top-8">
+              <div className="flex justify-between items-center mb-6">
+                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Inhaltsverzeichnis</span>
+                <button 
+                  onClick={copyTOC}
+                  className="p-2 border border-slate-700 rounded-lg hover:border-orange-500 text-orange-500 transition-colors"
+                  title="TOC Kopieren"
+                >
+                  <Copy size={16} />
+                </button>
+              </div>
 
-        .orange-glow { box-shadow: 0 0 40px rgba(234, 88, 12, 0.1); }
-        .orange-glow-text { text-shadow: 0 0 15px rgba(234, 88, 12, 0.4); }
-        
-        .content-display { 
-            white-space: pre-wrap; 
-            word-wrap: break-word; 
-            line-height: 1.6;
-            font-size: 1.15rem; /* Korrigierte Lesegröße */
-        }
+              {/* Archiv Umschalter */}
+              <div className="flex bg-black/40 border border-slate-800 rounded-xl p-1 mb-6">
+                <button 
+                  onClick={() => setArchiveMode('xposts')}
+                  className={`flex-1 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${archiveMode === 'xposts' ? 'bg-slate-800 text-orange-500 border border-slate-700' : 'text-slate-500 border border-transparent'}`}
+                >
+                  X-Posts
+                </button>
+                <button 
+                  onClick={() => setArchiveMode('resonance')}
+                  className={`flex-1 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${archiveMode === 'resonance' ? 'bg-slate-800 text-orange-500 border border-slate-700' : 'text-slate-500 border border-transparent'}`}
+                >
+                  Resonanz
+                </button>
+              </div>
 
-        .tab-font { font-family: 'Fira Code', monospace; }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        
-        /* Buttons mit Umrandung für bessere Sichtbarkeit */
-        .btn-outline {
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            transition: all 0.2s ease;
-        }
-        .btn-outline:hover {
-            border-color: rgba(234, 88, 12, 0.5);
-            background: rgba(255, 255, 255, 0.05);
-        }
+              {/* Search */}
+              <div className="relative mb-6">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" size={14} />
+                <input 
+                  type="text"
+                  placeholder="SUCHEN..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-black/30 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-xs font-bold focus:border-orange-500 outline-none transition-all"
+                />
+              </div>
 
-        @keyframes fadeIn { 
-            from { opacity: 0; transform: translateY(5px); } 
-            to { opacity: 1; transform: translateY(0); } 
-        }
-        .animate-fade { animation: fadeIn 0.3s ease-out forwards; }
-        
-        textarea {
-            font-size: 1.1rem !important; /* Kein Riesen-Text mehr */
-            line-height: 1.5 !important;
-        }
+              {/* List */}
+              <div className="space-y-1 max-h-[50vh] overflow-y-auto pr-2 custom-scrollbar">
+                {filteredEntries.map(e => (
+                  <button
+                    key={e.id}
+                    onClick={() => {
+                      setView('archive');
+                      setExpandedId(expandedId === e.id ? null : e.id);
+                    }}
+                    className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-all text-left ${expandedId === e.id ? 'bg-orange-600/10 border-orange-500/40' : 'bg-transparent border-transparent hover:border-slate-700'}`}
+                  >
+                    <span className="font-mono text-[10px] text-orange-500/70">#{e.tabNumber}</span>
+                    <span className={`text-[11px] font-bold uppercase truncate flex-1 ${expandedId === e.id ? 'text-white' : 'text-slate-400'}`}>
+                      {e.title}
+                    </span>
+                    {e.type === 'xposts' && <StatusDot status={e.xStatus} />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </aside>
 
-        /* Custom Scrollbar */
-        .custom-scroll::-webkit-scrollbar { width: 5px; }
-        .custom-scroll::-webkit-scrollbar-track { background: transparent; }
-        .custom-scroll::-webkit-scrollbar-thumb { background: rgba(234, 88, 12, 0.3); border-radius: 10px; }
-    </style>
-</head>
-<body>
-    <div id="root"></div>
+          {/* Main Content */}
+          <main className="lg:col-span-8">
+            {view === 'archive' ? (
+              <div className="space-y-4">
+                {filteredEntries.length === 0 && (
+                  <div className="text-center py-20 border border-dashed border-slate-800 rounded-[2rem] text-slate-600 uppercase text-xs font-bold tracking-widest">
+                    Keine Einträge in dieser Sphäre
+                  </div>
+                )}
+                {filteredEntries.map(e => (
+                  <div 
+                    key={e.id}
+                    className={`bg-[#0f172a] rounded-[2rem] border transition-all duration-500 overflow-hidden ${expandedId === e.id ? 'border-orange-500/50 ring-1 ring-orange-500/20' : 'border-slate-800'}`}
+                  >
+                    {/* Entry Header */}
+                    <button 
+                      onClick={() => setExpandedId(expandedId === e.id ? null : e.id)}
+                      className="w-full p-6 md:p-8 flex items-center justify-between group"
+                    >
+                      <div className="flex items-center gap-6">
+                        <span className="font-mono text-xl opacity-20 group-hover:opacity-100 transition-opacity">#{e.tabNumber}</span>
+                        <h2 className={`text-xl md:text-2xl font-black uppercase tracking-tight transition-all ${expandedId === e.id ? 'text-orange-500' : 'text-slate-300'}`}>
+                          {e.title}
+                        </h2>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        {e.type === 'xposts' && <StatusDot status={e.xStatus} />}
+                        {expandedId === e.id ? <ChevronUp className="text-orange-500" /> : <ChevronDown className="opacity-20" />}
+                      </div>
+                    </button>
 
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        const firebaseConfig = {
-            apiKey: "AIzaSyAMtyzMqA4V482hyh9rpUeqcrXqD5TC5ec",
-            authDomain: "refugium-e1be0.firebaseapp.com",
-            projectId: "refugium-e1be0",
-            storageBucket: "refugium-e1be0.firebasestorage.app",
-            messagingSenderId: "1088445665284",
-            appId: "1:1088445665284:web:ebcc5a46833e378b09e551"
-        };
-
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        window.fb = { db, auth, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, signInAnonymously, onAuthStateChanged };
-    </script>
-
-    <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
-
-        const LucideIcon = ({ name, size = 18, className = "" }) => {
-            useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [name]);
-            return <i data-lucide={name} style={{ width: size, height: size }} className={className}></i>;
-        };
-
-        const App = () => {
-            const [view, setView] = useState('dashboard');
-            const [archiveMode, setArchiveMode] = useState('xposts');
-            const [entries, setEntries] = useState([]);
-            const [expandedId, setExpandedId] = useState(null);
-            const [search, setSearch] = useState('');
-            const [editingId, setEditingId] = useState(null);
-            
-            const [formData, setFormData] = useState({ 
-                title: '', 
-                content: '', 
-                xStatus: 'standby', 
-                tabNumber: '',
-                type: 'xposts'
-            });
-
-            useEffect(() => {
-                const init = async () => {
-                    if (!window.fb) return setTimeout(init, 500);
-                    const { auth, signInAnonymously, onAuthStateChanged } = window.fb;
-                    try {
-                        await signInAnonymously(auth);
-                        onAuthStateChanged(auth, (u) => { if (u) loadData(); });
-                    } catch(e) { console.error("Verbindung zum Aether unterbrochen", e); }
-                };
-                init();
-            }, []);
-
-            const loadData = () => {
-                const { db, collection, onSnapshot, query, orderBy } = window.fb;
-                const q = query(collection(db, "refugium_sync"), orderBy("timestamp", "desc"));
-                onSnapshot(q, (snapshot) => {
-                    setEntries(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-                });
-            };
-
-            const addSeparator = () => {
-                setFormData(prev => ({
-                    ...prev,
-                    content: prev.content + "\n--------------------\n"
-                }));
-            };
-
-            const handleSave = async () => {
-                if (!formData.title || !formData.content) return;
-                const { db, collection, addDoc, updateDoc, doc, serverTimestamp } = window.fb;
-                
-                let tNumber = formData.tabNumber;
-                if (!tNumber) {
-                    const count = entries.filter(e => e.type === formData.type).length + 1;
-                    tNumber = count.toString().padStart(3, '0');
-                }
-
-                const data = {
-                    ...formData,
-                    tabNumber: tNumber,
-                    type: view === 'dashboard' ? formData.type : archiveMode,
-                    timestamp: serverTimestamp(),
-                    updatedAt: new Date().toLocaleString('de-DE')
-                };
-
-                if (editingId) {
-                    await updateDoc(doc(db, "refugium_sync", editingId), data);
-                    setEditingId(null);
-                } else {
-                    await addDoc(collection(db, "refugium_sync"), {
-                        ...data,
-                        createdAt: new Date().toLocaleString('de-DE')
-                    });
-                }
-
-                setFormData({ title: '', content: '', xStatus: 'standby', tabNumber: '', type: 'xposts' });
-                if (view === 'dashboard') setView('archive');
-            };
-
-            const deleteEntry = async (id) => {
-                if (!confirm("Eintrag unwiderruflich löschen?")) return;
-                const { db, doc, deleteDoc } = window.fb;
-                await deleteDoc(doc(db, "refugium_sync", id));
-            };
-
-            const copyTOC = () => {
-                const currentList = entries
-                    .filter(e => e.type === archiveMode)
-                    .sort((a,b) => a.tabNumber.localeCompare(b.tabNumber));
-                
-                const tocText = `ARCHE LOG [${archiveMode.toUpperCase()}]:\n` + 
-                    currentList.map(e => `[${e.tabNumber}] ${e.title} | Status: ${e.xStatus}`).join('\n');
-                
-                navigator.clipboard.writeText(tocText);
-                alert("Log in die Zwischenablage übertragen.");
-            };
-
-            const copySingle = (e) => {
-                const text = `${e.title}\n[Tab ${e.tabNumber}]\n\n${e.content}`;
-                navigator.clipboard.writeText(text);
-            };
-
-            const startEdit = (e) => {
-                setFormData({
-                    title: e.title,
-                    content: e.content,
-                    xStatus: e.xStatus || 'standby',
-                    tabNumber: e.tabNumber,
-                    type: e.type || 'xposts'
-                });
-                setEditingId(e.id);
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-            };
-
-            const filteredEntries = entries
-                .filter(e => e.type === archiveMode)
-                .filter(e => e.title.toLowerCase().includes(search.toLowerCase()) || e.tabNumber.includes(search))
-                .sort((a,b) => a.tabNumber.localeCompare(b.tabNumber));
-
-            return (
-                <div className="min-h-screen p-4 md:p-8 italic">
-                    <div className="max-w-7xl mx-auto">
-                        
-                        {/* NAVIGATION HEADER */}
-                        <div className="flex flex-col md:flex-row justify-between items-center mb-12 gap-6">
-                            <h1 className="text-5xl font-extrabold uppercase tracking-tighter italic">
-                                ARCHE <span className="text-orange-500 orange-glow-text">5.1</span>
-                            </h1>
-                            
-                            <div className="flex bg-white/5 p-1 rounded-3xl border border-white/10">
-                                <button 
-                                    onClick={() => {setView('dashboard'); setEditingId(null);}} 
-                                    className={`px-8 py-3 rounded-2xl text-[10px] font-bold uppercase tracking-widest transition-all ${view === 'dashboard' && !editingId ? 'bg-orange-600 text-white' : 'opacity-60 hover:opacity-100'}`}
-                                >
-                                    Neuaufnahme
-                                </button>
-                                <button 
-                                    onClick={() => setView('archive')} 
-                                    className={`px-8 py-3 rounded-2xl text-[10px] font-bold uppercase tracking-widest transition-all ${view === 'archive' ? 'bg-orange-600 text-white' : 'opacity-60 hover:opacity-100'}`}
-                                >
-                                    Archiv-Zentrum
-                                </button>
-                            </div>
+                    {/* Entry Content */}
+                    {expandedId === e.id && (
+                      <div className="px-6 md:px-8 pb-8 animate-in fade-in slide-in-from-top-4 duration-300">
+                        {/* Actions */}
+                        <div className="flex flex-wrap gap-2 mb-8 border-t border-slate-800 pt-6">
+                          <button onClick={() => copyEntry(e)} className="flex items-center gap-2 px-4 py-2 border border-slate-700 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:border-orange-500 transition-all">
+                            <Copy size={14} /> Kopieren
+                          </button>
+                          <button onClick={() => startEdit(e)} className="flex items-center gap-2 px-4 py-2 border border-slate-700 rounded-xl text-[10px] font-bold uppercase tracking-widest text-blue-400 hover:border-blue-400 transition-all">
+                            <Edit3 size={14} /> Editieren
+                          </button>
+                          <button onClick={() => deleteEntry(e.id)} className="flex items-center gap-2 px-4 py-2 border border-slate-700 rounded-xl text-[10px] font-bold uppercase tracking-widest text-red-500 hover:border-red-500 transition-all ml-auto">
+                            <Trash2 size={14} /> Löschen
+                          </button>
                         </div>
 
-                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                            
-                            {/* TOC SECTION */}
-                            <aside className="lg:col-span-4 space-y-4">
-                                <div className="glass p-6 rounded-[2rem] border-white/10 sticky top-4">
-                                    <div className="flex justify-between items-center mb-6">
-                                        <h2 className="text-[10px] font-bold uppercase tracking-widest opacity-60">Inhaltsverzeichnis</h2>
-                                        <button onClick={copyTOC} className="btn-outline px-3 py-1.5 rounded-lg text-orange-500 flex items-center gap-2 group transition-all">
-                                            <span className="text-[9px] font-bold uppercase tracking-widest">Kopieren</span>
-                                            <LucideIcon name="copy" size={12} />
-                                        </button>
-                                    </div>
-
-                                    {/* Archive Switcher */}
-                                    <div className="grid grid-cols-2 gap-2 mb-6 p-1 bg-black/40 rounded-xl border border-white/5">
-                                        <button onClick={() => setArchiveMode('xposts')} className={`py-2 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all border ${archiveMode === 'xposts' ? 'bg-white/10 border-orange-500/50' : 'opacity-40 border-transparent'}`}>X-Posts</button>
-                                        <button onClick={() => setArchiveMode('resonanz')} className={`py-2 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all border ${archiveMode === 'resonanz' ? 'bg-white/10 border-orange-500/50' : 'opacity-40 border-transparent'}`}>Resonanz</button>
-                                    </div>
-
-                                    <div className="relative mb-6">
-                                        <input 
-                                            className="w-full bg-black/40 border border-white/20 p-3 pl-10 rounded-xl text-xs outline-none focus:border-orange-500 font-bold transition-all"
-                                            placeholder="SUCHEN..."
-                                            value={search}
-                                            onChange={e => setSearch(e.target.value)}
-                                        />
-                                        <LucideIcon name="search" size={14} className="absolute left-3 top-3 opacity-40" />
-                                    </div>
-
-                                    <div className="space-y-1 max-h-[60vh] overflow-y-auto custom-scroll pr-1">
-                                        {filteredEntries.map(e => (
-                                            <button 
-                                                key={e.id}
-                                                onClick={() => {
-                                                    setView('archive');
-                                                    setExpandedId(e.id);
-                                                    setTimeout(() => {
-                                                        document.getElementById(`entry-${e.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                                    }, 50);
-                                                }}
-                                                className={`w-full text-left p-4 rounded-xl transition-all flex items-center gap-3 border ${expandedId === e.id ? 'bg-orange-600/10 border-orange-500/50' : 'bg-transparent border-white/5 hover:border-white/20'}`}
-                                            >
-                                                <span className="tab-font text-[9px] font-bold text-orange-500/80">#{e.tabNumber}</span>
-                                                <span className={`text-[10px] font-bold uppercase truncate flex-1 ${expandedId === e.id ? 'text-white' : 'text-slate-400'}`}>{e.title}</span>
-                                                {archiveMode === 'xposts' && (
-                                                    <div className={`w-1.5 h-1.5 rounded-full ${e.xStatus === 'sent' ? 'bg-green-500' : e.xStatus === 'warning' ? 'bg-red-500' : 'bg-white/20'}`}></div>
-                                                )}
-                                            </button>
-                                        ))}
-                                    </div>
+                        {/* Text Body */}
+                        <div className="text-slate-200 text-lg leading-relaxed whitespace-pre-wrap font-light">
+                          {e.content.split('--------------------').map((part, i, arr) => (
+                            <React.Fragment key={i}>
+                              {part}
+                              {i < arr.length - 1 && (
+                                <div className="my-10 flex items-center gap-4">
+                                  <div className="h-px flex-1 bg-slate-800" />
+                                  <span className="text-[8px] font-bold uppercase tracking-[0.6em] text-slate-600">Separator</span>
+                                  <div className="h-px flex-1 bg-slate-800" />
                                 </div>
-                            </aside>
-
-                            {/* MAIN WORKSPACE */}
-                            <main className="lg:col-span-8">
-                                {view === 'dashboard' || editingId ? (
-                                    <div className="glass p-8 rounded-[2.5rem] border-orange-500/20 animate-fade">
-                                        <div className="flex justify-between items-center mb-8">
-                                            <h2 className="text-lg font-bold uppercase tracking-widest text-orange-500 italic">
-                                                {editingId ? 'Edit-Modus' : 'Vektor-Eingabe'}
-                                            </h2>
-                                            {editingId && (
-                                                <button onClick={() => {setEditingId(null); setFormData({title:'', content:'', xStatus:'standby', tabNumber:'', type:'xposts'});}} className="btn-outline px-4 py-2 rounded-xl text-[9px] font-bold uppercase tracking-widest flex items-center gap-2">
-                                                    Abbrechen <LucideIcon name="x" size={12} />
-                                                </button>
-                                            )}
-                                        </div>
-
-                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                                            <div className="space-y-1">
-                                                <label className="text-[9px] font-bold uppercase tracking-widest opacity-60 ml-1">Bereich</label>
-                                                <select className="w-full bg-black/40 border border-white/20 p-3 rounded-xl outline-none focus:border-orange-500 text-[10px] font-bold uppercase cursor-pointer" value={formData.type} onChange={e => setFormData({...formData, type: e.target.value})}>
-                                                    <option value="xposts">X-Post Archiv</option>
-                                                    <option value="resonanz">Resonanz-Tab</option>
-                                                </select>
-                                            </div>
-                                            <div className="space-y-1">
-                                                <label className="text-[9px] font-bold uppercase tracking-widest opacity-60 ml-1">Tab Nummer</label>
-                                                <input className="w-full bg-black/40 border border-white/20 p-3 rounded-xl outline-none focus:border-orange-500 font-bold tab-font text-orange-500" placeholder="000" value={formData.tabNumber} onChange={e => setFormData({...formData, tabNumber: e.target.value})} />
-                                            </div>
-                                            <div className="space-y-1">
-                                                <label className="text-[9px] font-bold uppercase tracking-widest opacity-60 ml-1">Status</label>
-                                                <select className="w-full bg-black/40 border border-white/20 p-3 rounded-xl outline-none focus:border-orange-500 text-[10px] font-bold uppercase cursor-pointer" value={formData.xStatus} onChange={e => setFormData({...formData, xStatus: e.target.value})}>
-                                                    <option value="standby">⚪ Standby</option>
-                                                    <option value="sent">🟢 Sent (X)</option>
-                                                    <option value="warning">🔴 Warning</option>
-                                                </select>
-                                            </div>
-                                        </div>
-
-                                        <input 
-                                            className="w-full bg-black/40 border border-white/20 p-5 rounded-2xl outline-none focus:border-orange-500 font-bold text-xl uppercase italic mb-4" 
-                                            placeholder="TITEL DES TAB..." 
-                                            value={formData.title} 
-                                            onChange={e => setFormData({...formData, title: e.target.value})} 
-                                        />
-
-                                        <textarea 
-                                            className="w-full bg-black/40 border border-white/20 p-6 rounded-2xl h-[450px] outline-none focus:border-orange-500 transition-all resize-none text-white italic font-light no-scrollbar mb-4" 
-                                            placeholder="Schreibe die Geschichte..." 
-                                            value={formData.content} 
-                                            onChange={e => setFormData({...formData, content: e.target.value})}
-                                        ></textarea>
-
-                                        <div className="flex flex-col md:flex-row gap-4">
-                                            <button onClick={addSeparator} className="btn-outline px-6 py-4 rounded-xl text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-2">
-                                                <LucideIcon name="separator-horizontal" size={14} /> Trennlinie (20x)
-                                            </button>
-                                            <button onClick={handleSave} className="flex-1 bg-orange-600 py-4 rounded-xl font-bold uppercase tracking-[0.4em] hover:bg-orange-500 transition-all text-sm shadow-lg shadow-orange-900/20">
-                                                {editingId ? 'Änderungen Speichern' : 'In die Arche Sichern'}
-                                            </button>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-4 pb-40 animate-fade">
-                                        <div className="flex justify-between items-center px-4 mb-2">
-                                            <h2 className="text-xl font-bold uppercase tracking-widest opacity-60">
-                                                {archiveMode === 'xposts' ? 'X-Post Archiv' : 'Resonanz Archiv'}
-                                            </h2>
-                                        </div>
-                                        
-                                        {filteredEntries.map(e => (
-                                            <div key={e.id} id={`entry-${e.id}`} className={`glass rounded-3xl overflow-hidden border transition-all duration-300 ${expandedId === e.id ? 'border-orange-500/50 orange-glow' : 'border-white/10'}`}>
-                                                <button onClick={() => setExpandedId(expandedId === e.id ? null : e.id)} className="w-full p-8 flex items-center justify-between text-left group">
-                                                    <div className="flex items-center gap-6">
-                                                        <span className="tab-font text-xl font-bold opacity-30">#{e.tabNumber}</span>
-                                                        <h3 className={`text-2xl font-bold uppercase tracking-tight italic transition-all ${expandedId === e.id ? 'text-orange-500' : 'text-white/80 group-hover:text-white'}`}>
-                                                            {e.title}
-                                                        </h3>
-                                                    </div>
-                                                    <div className="flex items-center gap-6">
-                                                        {archiveMode === 'xposts' && (
-                                                            <div className={`w-2.5 h-2.5 rounded-full ${e.xStatus === 'sent' ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.4)]' : e.xStatus === 'warning' ? 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.4)]' : 'bg-slate-700'}`}></div>
-                                                        )}
-                                                        <LucideIcon name={expandedId === e.id ? "chevron-up" : "chevron-down"} className={`transition-all ${expandedId === e.id ? 'text-orange-500' : 'opacity-20'}`} />
-                                                    </div>
-                                                </button>
-
-                                                {expandedId === e.id && (
-                                                    <div className="px-8 pb-8 animate-fade">
-                                                        <div className="flex gap-2 mb-8">
-                                                            <button onClick={() => copySingle(e)} className="btn-outline px-4 py-2 rounded-lg text-[9px] font-bold uppercase tracking-widest flex items-center gap-2">
-                                                                <LucideIcon name="copy" size={12} /> Kopieren
-                                                            </button>
-                                                            <button onClick={() => startEdit(e)} className="btn-outline px-4 py-2 rounded-lg text-[9px] font-bold uppercase tracking-widest flex items-center gap-2 text-blue-400">
-                                                                <LucideIcon name="edit" size={12} /> Editieren
-                                                            </button>
-                                                            <button onClick={() => deleteEntry(e.id)} className="btn-outline px-4 py-2 rounded-lg text-[9px] font-bold uppercase tracking-widest flex items-center gap-2 text-red-500 ml-auto">
-                                                                <LucideIcon name="trash-2" size={12} /> Löschen
-                                                            </button>
-                                                        </div>
-
-                                                        <div className="content-display text-slate-300 italic font-light">
-                                                            {e.content.split('--------------------').map((part, idx, arr) => (
-                                                                <React.Fragment key={idx}>
-                                                                    {part}
-                                                                    {idx < arr.length - 1 && (
-                                                                        <div className="my-8 flex items-center gap-4 opacity-30">
-                                                                            <div className="h-[1px] flex-1 bg-white/20"></div>
-                                                                            <span className="text-[8px] font-bold uppercase tracking-[0.5em]">Trennlinie</span>
-                                                                            <div className="h-[1px] flex-1 bg-white/20"></div>
-                                                                        </div>
-                                                                    )}
-                                                                </React.Fragment>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </main>
+                              )}
+                            </React.Fragment>
+                          ))}
                         </div>
-                    </div>
-
-                    <footer className="mt-40 pb-20 text-center opacity-10 tracking-[1em] text-[10px] font-bold uppercase">
-                        Igel Füchsin Blindschleiche aus Licht
-                    </footer>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              /* Editor View (Create/Edit) */
+              <div className="bg-[#0f172a] border border-orange-500/30 rounded-[2.5rem] p-8 animate-in zoom-in-95 duration-300">
+                <div className="flex justify-between items-center mb-8">
+                  <h2 className="text-xl font-black uppercase text-orange-500">
+                    {editingId ? 'Vektor Korrektur' : 'Neue Resonanz'}
+                  </h2>
+                  <button 
+                    onClick={() => {setView('archive'); setEditingId(null);}}
+                    className="p-2 border border-slate-700 rounded-full hover:bg-slate-800"
+                  >
+                    <X size={20} />
+                  </button>
                 </div>
-            );
-        };
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
-</body>
-</html>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase text-slate-500 mb-2 ml-1">Typ</label>
+                    <select 
+                      className="w-full bg-black/40 border border-slate-700 rounded-xl p-3 text-xs font-bold uppercase outline-none focus:border-orange-500"
+                      value={formData.type}
+                      onChange={(e) => setFormData({...formData, type: e.target.value})}
+                    >
+                      <option value="xposts">X-Post Archiv</option>
+                      <option value="resonance">Resonanz</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase text-slate-500 mb-2 ml-1">Tab #</label>
+                    <input 
+                      type="text"
+                      placeholder="000"
+                      className="w-full bg-black/40 border border-slate-700 rounded-xl p-3 font-mono text-orange-500 font-bold outline-none focus:border-orange-500"
+                      value={formData.tabNumber}
+                      onChange={(e) => setFormData({...formData, tabNumber: e.target.value})}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase text-slate-500 mb-2 ml-1">Status</label>
+                    <select 
+                      className="w-full bg-black/40 border border-slate-700 rounded-xl p-3 text-xs font-bold uppercase outline-none focus:border-orange-500"
+                      value={formData.xStatus}
+                      onChange={(e) => setFormData({...formData, xStatus: e.target.value})}
+                    >
+                      <option value="standby">⚪ Standby</option>
+                      <option value="sent">🟢 Gesendet</option>
+                      <option value="warning">🔴 Kritisch</option>
+                    </select>
+                  </div>
+                </div>
+
+                <input 
+                  type="text"
+                  placeholder="TITEL DES TAB..."
+                  className="w-full bg-black/40 border border-slate-700 rounded-xl p-5 mb-4 text-xl font-black uppercase italic outline-none focus:border-orange-500"
+                  value={formData.title}
+                  onChange={(e) => setFormData({...formData, title: e.target.value})}
+                />
+
+                <textarea 
+                  placeholder="Inhalt der Arche..."
+                  className="w-full bg-black/40 border border-slate-700 rounded-xl p-6 h-80 mb-4 text-lg leading-relaxed outline-none focus:border-orange-500 resize-none font-light"
+                  value={formData.content}
+                  onChange={(e) => setFormData({...formData, content: e.target.value})}
+                />
+
+                <div className="flex flex-col md:flex-row gap-4">
+                  <button 
+                    onClick={addSeparator}
+                    className="flex items-center justify-center gap-2 px-6 py-4 border border-slate-700 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-slate-800 transition-all"
+                  >
+                    <SeparatorHorizontal size={18} /> Trennlinie
+                  </button>
+                  <button 
+                    onClick={handleSave}
+                    className="flex-1 bg-orange-600 hover:bg-orange-500 text-white py-4 rounded-xl text-sm font-black uppercase tracking-[0.3em] transition-all shadow-lg shadow-orange-900/20"
+                  >
+                    In die Arche Speichern
+                  </button>
+                </div>
+              </div>
+            )}
+          </main>
+        </div>
+        
+        <footer className="mt-20 py-10 text-center border-t border-slate-900">
+          <p className="text-[10px] font-bold uppercase tracking-[1em] text-slate-700">
+            Igel Füchsin Blindschleiche aus Licht
+          </p>
+        </footer>
+      </div>
+    </div>
+  );
+};
+
+export default App;
