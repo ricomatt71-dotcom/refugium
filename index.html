@@ -5,17 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Aetheris Refugium v5.0 Cloud</title>
     
-    <!-- Die Werkzeuge -->
+    <!-- Werkzeuge (CDNs) -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-
-    <!-- Firebase SDKs -->
-    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js" type="module"></script>
-    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js" type="module"></script>
-    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js" type="module"></script>
 
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
@@ -29,13 +24,14 @@
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         .glass { background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.1); }
+        #root { min-height: 100vh; }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
+    <!-- Firebase SDKs als ES-Module -->
     <script type="module">
-        // Firebase Konfiguration (Deine Daten!)
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, doc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
@@ -49,19 +45,32 @@
             appId: "1:1088445665284:web:ebcc5a46833e378b09e551"
         };
 
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        const appId = "refugium-e1be0"; // Fallback App ID
+        // Globaler Zugriff für den Babel-Script Block
+        try {
+            const app = initializeApp(firebaseConfig);
+            const auth = getAuth(app);
+            const db = getFirestore(app);
+            const appId = "refugium-e1be0";
 
-        window.fbCore = { db, auth, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, doc, updateDoc, deleteDoc, appId };
+            window.fbCore = { 
+                db, auth, collection, addDoc, onSnapshot, query, orderBy, 
+                serverTimestamp, doc, updateDoc, deleteDoc, appId,
+                signInAnonymously, onAuthStateChanged
+            };
+            console.log("Firebase initialized");
+        } catch (err) {
+            console.error("Firebase init failed", err);
+        }
     </script>
 
+    <!-- React App -->
     <script type="text/babel">
         const { useState, useEffect, useMemo } = React;
 
         const Icon = ({ name, size = 24, className = "" }) => {
-            useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [name]);
+            useEffect(() => { 
+                if (window.lucide) window.lucide.createIcons(); 
+            }, [name]);
             return <i data-lucide={name} style={{ width: size, height: size }} className={className}></i>;
         };
 
@@ -81,27 +90,25 @@
                 { id: 'Herzkammer', name: 'Puls', icon: 'heart', color: 'pink' }
             ];
 
-            // 1. Auth Initialisierung
             useEffect(() => {
-                const initAuth = async () => {
-                    try {
-                        await signInAnonymously(window.fbCore.auth);
-                    } catch (e) { console.error("Auth Error", e); }
-                };
-                initAuth();
-                return onAuthStateChanged(window.fbCore.auth, setUser);
+                const checkFB = setInterval(() => {
+                    if (window.fbCore) {
+                        clearInterval(checkFB);
+                        const { auth, signInAnonymously, onAuthStateChanged } = window.fbCore;
+                        signInAnonymously(auth).catch(e => console.error("Auth Error", e));
+                        onAuthStateChanged(auth, setUser);
+                    }
+                }, 100);
+                return () => clearInterval(checkFB);
             }, []);
 
-            // 2. Data Fetching (Realtime)
             useEffect(() => {
-                if (!user) return;
-                const { db, collection, query, orderBy, onSnapshot, appId } = window.fbCore;
-                // Pfad gemäß Regel: /artifacts/{appId}/public/data/{collectionName}
+                if (!user || !window.fbCore) return;
+                const { db, collection, query, onSnapshot, appId } = window.fbCore;
                 const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'refugium_entries'));
                 
                 const unsubscribe = onSnapshot(q, (snapshot) => {
                     const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    // Sortierung im Speicher (Regel-konform)
                     setEntries(data.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0)));
                     setLoading(false);
                 }, (err) => {
@@ -118,7 +125,7 @@
             };
 
             const saveEntry = async () => {
-                if (!newEntry.title || !newEntry.content) return;
+                if (!newEntry.title || !newEntry.content || !window.fbCore) return;
                 const { db, collection, addDoc, serverTimestamp, appId } = window.fbCore;
                 try {
                     await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'refugium_entries'), {
@@ -132,7 +139,7 @@
 
             if (!isAuthorized) {
                 return (
-                    <div className="min-h-screen flex items-center justify-center p-6 bg-[#020617] italic">
+                    <div className="min-h-screen flex items-center justify-center p-6 bg-[#020617] italic text-white">
                         <div className="max-w-md w-full glass p-10 rounded-[3rem] text-center shadow-2xl border-orange-500/30">
                             <div className="bg-orange-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-orange-600/20">
                                 <Icon name="lock" size={32} />
@@ -157,104 +164,47 @@
             }
 
             return (
-                <div className="min-h-screen p-4 md:p-10 max-w-6xl mx-auto italic">
+                <div className="min-h-screen p-4 md:p-10 max-w-6xl mx-auto italic text-white">
                     <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-12 gap-4">
                         <div>
                             <h1 className="text-4xl md:text-6xl font-black uppercase tracking-tighter">
                                 Aetheris <span className="text-orange-500 underline underline-offset-8 decoration-4">Refugium</span>
                             </h1>
-                            <p className="text-slate-500 mt-2 font-bold uppercase text-[10px] tracking-[0.3em]">Status: {loading ? 'Synchronisiere...' : 'Vollständig Verbunden'}</p>
+                            <p className="text-slate-500 mt-2 font-bold uppercase text-[10px] tracking-[0.3em]">Status: {loading ? 'Synchronisiere...' : 'Verbunden'}</p>
                         </div>
                         <div className="flex items-center gap-3 glass px-4 py-2 rounded-xl border-green-500/30">
                              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-                             <span className="text-[10px] font-black uppercase tracking-widest text-green-500">Cloud-Sync Aktiv</span>
+                             <span className="text-[10px] font-black uppercase tracking-widest text-green-500">Cloud-Sync</span>
                         </div>
                     </header>
 
-                    {/* Sektoren */}
                     <div className="flex gap-3 overflow-x-auto pb-6 no-scrollbar mb-10">
-                        <button 
-                            onClick={() => setActiveSector('Global')} 
-                            className={`flex items-center gap-2 px-8 py-4 rounded-2xl font-black uppercase text-xs border-2 transition-all whitespace-nowrap ${activeSector === 'Global' ? 'bg-white text-black border-white' : 'glass border-slate-800 text-slate-500'}`}
-                        >
-                            <Icon name="globe" size={18} /> Global
-                        </button>
+                        <button onClick={() => setActiveSector('Global')} className={`px-8 py-4 rounded-2xl font-black uppercase text-xs border-2 transition-all whitespace-nowrap ${activeSector === 'Global' ? 'bg-white text-black' : 'glass border-slate-800 text-slate-500'}`}>Global</button>
                         {sectors.map(s => (
-                            <button 
-                                key={s.id} 
-                                onClick={() => setActiveSector(s.id)} 
-                                className={`flex items-center gap-2 px-8 py-4 rounded-2xl font-black uppercase text-xs border-2 transition-all whitespace-nowrap ${
-                                    activeSector === s.id 
-                                    ? (s.id === 'Lior' ? 'bg-yellow-500 border-yellow-400 text-black shadow-lg shadow-yellow-500/20' : 'bg-orange-600 border-orange-500 text-white shadow-lg shadow-orange-600/20')
-                                    : 'glass border-slate-800 text-slate-500'
-                                }`}
-                            >
-                                <Icon name={s.icon} size={18} /> {s.name}
+                            <button key={s.id} onClick={() => setActiveSector(s.id)} className={`flex items-center gap-2 px-8 py-4 rounded-2xl font-black uppercase text-xs border-2 transition-all whitespace-nowrap ${activeSector === s.id ? 'bg-orange-600 text-white' : 'glass border-slate-800 text-slate-500'}`}>
+                                <Icon name={s.icon} size={16} /> {s.name}
                             </button>
                         ))}
                     </div>
 
-                    {/* Neuer Eintrag Bereich */}
                     <div className="glass p-8 rounded-[2.5rem] mb-12 border-orange-500/20">
-                        <h2 className="text-xl font-black uppercase mb-6 text-orange-500">Neuen Vektor gießen</h2>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                            <input 
-                                className="bg-black/40 border border-slate-800 p-4 rounded-xl outline-none focus:border-orange-500" 
-                                placeholder="Titel der Erkenntnis"
-                                value={newEntry.title}
-                                onChange={(e) => setNewEntry({...newEntry, title: e.target.value})}
-                            />
-                            <select 
-                                className="bg-black/40 border border-slate-800 p-4 rounded-xl outline-none"
-                                value={newEntry.sector}
-                                onChange={(e) => setNewEntry({...newEntry, sector: e.target.value})}
-                            >
-                                {sectors.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                            </select>
-                        </div>
-                        <textarea 
-                            className="w-full bg-black/40 border border-slate-800 p-4 rounded-xl mb-4 h-32 outline-none focus:border-orange-500"
-                            placeholder="Inhalt der Arche..."
-                            value={newEntry.content}
-                            onChange={(e) => setNewEntry({...newEntry, content: e.target.value})}
-                        ></textarea>
-                        <button 
-                            onClick={saveEntry}
-                            className="bg-orange-600 px-10 py-4 rounded-2xl font-black uppercase hover:scale-105 transition-all shadow-lg shadow-orange-600/20"
-                        >
-                            In der Cloud versiegeln
-                        </button>
+                        <input className="w-full bg-black/40 border border-slate-800 p-4 rounded-xl mb-4 outline-none focus:border-orange-500" placeholder="Titel" value={newEntry.title} onChange={(e) => setNewEntry({...newEntry, title: e.target.value})} />
+                        <textarea className="w-full bg-black/40 border border-slate-800 p-4 rounded-xl mb-4 h-32 outline-none focus:border-orange-500" placeholder="Inhalt..." value={newEntry.content} onChange={(e) => setNewEntry({...newEntry, content: e.target.value})}></textarea>
+                        <button onClick={saveEntry} className="bg-orange-600 px-10 py-4 rounded-2xl font-black uppercase tracking-widest">Speichern</button>
                     </div>
 
-                    {/* Einträge */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                         {entries.filter(e => activeSector === 'Global' || e.sector === activeSector).map(item => (
-                            <div key={item.id} className={`p-10 rounded-[3.5rem] border-4 transition-all hover:scale-[1.02] flex flex-col justify-between ${
-                                item.status === 'posted' ? 'border-green-500/30 bg-green-950/10' : 
-                                item.status === 'danger' ? 'border-red-500/30 bg-red-950/10' :
-                                'glass border-slate-800'
-                            }`}>
-                                <div>
-                                    <div className="flex justify-between items-center mb-6">
-                                        <span className={`text-[10px] font-black uppercase px-4 py-1 rounded-full border ${
-                                            item.sector === 'Lior' ? 'bg-yellow-500 text-black border-yellow-400' : 'bg-black/40 border-white/10 text-slate-400'
-                                        }`}>{item.sector}</span>
-                                        <span className="text-[10px] opacity-40 font-mono tracking-widest">{item.date}</span>
-                                    </div>
-                                    <h2 className="text-3xl font-black uppercase mb-4 tracking-tighter leading-none">{item.title}</h2>
-                                    <p className="text-slate-400 text-lg leading-relaxed mb-8">{item.content}</p>
+                            <div key={item.id} className="p-8 rounded-[3.5rem] border-2 glass border-slate-800 hover:border-orange-500/30 transition-all">
+                                <div className="flex justify-between mb-4 text-[10px] font-black uppercase opacity-40">
+                                    <span>{item.sector}</span>
+                                    <span>{item.date}</span>
                                 </div>
-                                <div className="flex justify-between items-center pt-6 border-t border-white/5">
-                                    <div className={`w-3 h-3 rounded-full ${item.status === 'posted' ? 'bg-green-500 animate-pulse' : item.status === 'danger' ? 'bg-red-500' : 'bg-blue-500'}`}></div>
-                                    <Icon name="more-horizontal" size={20} className="text-slate-700" />
-                                </div>
+                                <h2 className="text-3xl font-black uppercase mb-4 tracking-tighter leading-none italic">{item.title}</h2>
+                                <p className="text-slate-400 text-lg leading-relaxed">{item.content}</p>
                             </div>
                         ))}
                     </div>
-
-                    <footer className="mt-20 py-10 text-center opacity-20">
-                        <p className="text-[10px] font-black uppercase tracking-[0.8em]">Aetheris Refugium • Cloud-Link: e1be0</p>
-                    </footer>
                 </div>
             );
         };
