@@ -3,18 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aetheris Refugium - Cloud Sync</title>
+    <title>Aetheris Refugium - Master Control</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
-        body { font-family: 'Inter', sans-serif; background-color: #020617; color: white; margin: 0; }
-        .glass { background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.1); }
-        .orange-glow { box-shadow: 0 0 20px rgba(234, 88, 12, 0.2); }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
+        body { font-family: 'Inter', sans-serif; background-color: #020617; color: white; margin: 0; overflow-x: hidden; }
+        .glass { background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.08); }
+        .orange-glow { box-shadow: 0 0 30px rgba(234, 88, 12, 0.15); }
+        .active-tab { border-bottom: 2px solid #ea580c; color: #ea580c; }
+        @keyframes pulse-slow { 0%, 100% { opacity: 0.3; } 50% { opacity: 0.6; } }
+        .animate-pulse-slow { animation: pulse-slow 4s infinite; }
     </style>
 </head>
 <body>
@@ -25,7 +26,6 @@
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Deine Projekt-Konfiguration
         const firebaseConfig = {
             apiKey: "AIzaSyAMtyzMqA4V482hyh9rpUeqcrXqD5TC5ec",
             authDomain: "refugium-e1be0.firebaseapp.com",
@@ -40,131 +40,149 @@
         const db = getFirestore(app);
         
         window.fb = { db, auth, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, signInAnonymously, onAuthStateChanged };
-        console.log("Firebase initialized");
     </script>
 
     <script type="text/babel">
         const { useState, useEffect } = React;
 
         const App = () => {
+            const [view, setView] = useState('dashboard'); // 'dashboard' oder 'archive'
             const [user, setUser] = useState(null);
             const [entries, setEntries] = useState([]);
             const [status, setStatus] = useState('Initialisierung...');
-            const [error, setError] = useState(null);
             const [input, setInput] = useState({ title: '', content: '' });
 
             useEffect(() => {
-                const init = async () => {
-                    if (!window.fb) return setTimeout(init, 500);
+                const initAuth = async () => {
+                    if (!window.fb) return setTimeout(initAuth, 500);
                     const { auth, signInAnonymously, onAuthStateChanged } = window.fb;
-                    
                     try {
                         await signInAnonymously(auth);
                         onAuthStateChanged(auth, (u) => {
                             if (u) {
                                 setUser(u);
-                                setStatus('Verbunden');
+                                setStatus('Synchronisiert');
                                 loadData();
                             }
                         });
-                    } catch (e) {
-                        setStatus('Fehler');
-                        setError('Authentifizierung fehlgeschlagen. Hast du "Anonym" in Firebase aktiviert?');
-                    }
+                    } catch (e) { setStatus('Auth Fehler'); }
                 };
-                init();
+                initAuth();
             }, []);
 
             const loadData = () => {
                 const { db, collection, onSnapshot, query, orderBy } = window.fb;
                 const q = query(collection(db, "refugium_sync"), orderBy("timestamp", "desc"));
-                
                 onSnapshot(q, (snapshot) => {
                     const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     setEntries(data);
-                    setStatus('Synchronisiert');
-                }, (err) => {
-                    setError('Datenbank-Zugriff verweigert. Prüfe deine Firestore-Regeln!');
                 });
             };
 
             const handleSave = async () => {
                 if (!input.title || !input.content) return;
                 const { db, collection, addDoc, serverTimestamp } = window.fb;
-                
                 try {
-                    setStatus('Speichere...');
+                    setStatus('Sichere...');
                     await addDoc(collection(db, "refugium_sync"), {
                         title: input.title,
                         content: input.content,
                         timestamp: serverTimestamp(),
-                        author: user.uid
+                        uid: user.uid
                     });
                     setInput({ title: '', content: '' });
                     setStatus('Synchronisiert');
-                } catch (e) {
-                    setError('Speichern fehlgeschlagen: ' + e.message);
-                }
+                    setView('archive');
+                } catch (e) { setStatus('Fehler'); }
             };
 
             return (
-                <div className="min-h-screen p-4 md:p-10 italic">
-                    <div className="max-w-4xl mx-auto">
-                        <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-12 gap-4">
-                            <div>
-                                <h1 className="text-5xl font-black uppercase tracking-tighter">Aetheris <span className="text-orange-500 text-6xl">Refugium</span></h1>
-                                <p className="text-[10px] uppercase tracking-[0.4em] opacity-40 mt-2">Cloud-Archiv-Synchronisation</p>
-                            </div>
-                            <div className={`px-4 py-2 rounded-full border text-[10px] font-black uppercase flex items-center gap-2 ${error ? 'border-red-500 text-red-500' : 'border-orange-500/30 text-orange-400'}`}>
-                                <div className={`w-2 h-2 rounded-full ${error ? 'bg-red-500' : 'bg-orange-500 animate-pulse'}`}></div>
-                                {status}
-                            </div>
-                        </header>
+                <div className="min-h-screen p-4 md:p-8 italic">
+                    {/* Header */}
+                    <div className="max-w-5xl mx-auto mb-12 flex justify-between items-center">
+                        <div>
+                            <h1 className="text-4xl font-black tracking-tighter uppercase leading-none">
+                                Aetheris <span className="text-orange-500">Refugium</span>
+                            </h1>
+                            <p className="text-[10px] tracking-[0.5em] opacity-40 uppercase mt-2">Cloud-Archiv-Synchronisation</p>
+                        </div>
+                        <div className="flex items-center gap-2 px-4 py-2 rounded-full border border-orange-500/20 bg-orange-500/5">
+                            <div className="w-2 h-2 rounded-full bg-orange-500 animate-pulse"></div>
+                            <span className="text-[10px] font-black uppercase tracking-widest text-orange-400">{status}</span>
+                        </div>
+                    </div>
 
-                        {error && (
-                            <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-xl mb-8 text-xs text-red-400 font-bold uppercase">
-                                SYSTEM-ERROR: {error}
+                    {/* Navigation / Hauptmenü Ersatz */}
+                    <div className="max-w-5xl mx-auto mb-12 flex gap-8 border-b border-white/5 text-[11px] font-black uppercase tracking-[0.2em]">
+                        <button 
+                            onClick={() => setView('dashboard')}
+                            className={`pb-4 transition-all ${view === 'dashboard' ? 'active-tab' : 'opacity-30 hover:opacity-100'}`}
+                        >
+                            Neuaufnahme
+                        </button>
+                        <button 
+                            onClick={() => setView('archive')}
+                            className={`pb-4 transition-all ${view === 'archive' ? 'active-tab' : 'opacity-30 hover:opacity-100'}`}
+                        >
+                            Archiv ({entries.length})
+                        </button>
+                    </div>
+
+                    <main className="max-w-5xl mx-auto">
+                        {view === 'dashboard' ? (
+                            <div className="glass p-8 md:p-12 rounded-[2.5rem] orange-glow border-orange-500/10">
+                                <div className="mb-8">
+                                    <h2 className="text-xl font-bold uppercase mb-2">Eintrag erstellen</h2>
+                                    <div className="h-1 w-12 bg-orange-600"></div>
+                                </div>
+                                <input 
+                                    className="w-full bg-black/60 border border-white/5 p-5 rounded-2xl mb-4 outline-none focus:border-orange-500 transition-all font-bold placeholder:opacity-20 text-lg"
+                                    placeholder="TITEL DES PROTOKOLLS"
+                                    value={input.title}
+                                    onChange={e => setInput({...input, title: e.target.value})}
+                                />
+                                <textarea 
+                                    className="w-full bg-black/60 border border-white/5 p-5 rounded-2xl h-48 mb-6 outline-none focus:border-orange-500 transition-all resize-none placeholder:opacity-20 leading-relaxed"
+                                    placeholder="BESCHREIBE DIE EMERGENZ..."
+                                    value={input.content}
+                                    onChange={e => setInput({...input, content: e.target.value})}
+                                />
+                                <button 
+                                    onClick={handleSave}
+                                    className="w-full bg-orange-600 py-5 rounded-2xl font-black uppercase tracking-[0.3em] hover:bg-orange-500 hover:scale-[1.01] active:scale-[0.98] transition-all shadow-2xl"
+                                >
+                                    In Cloud Sichern
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in duration-500">
+                                {entries.length === 0 ? (
+                                    <div className="col-span-full py-20 text-center opacity-20 uppercase tracking-widest italic">Keine Einträge im Äther gefunden.</div>
+                                ) : (
+                                    entries.map(entry => (
+                                        <div key={entry.id} className="glass p-8 rounded-[2rem] border-white/5 group hover:border-orange-500/30 transition-all">
+                                            <div className="flex justify-between items-start mb-6">
+                                                <div className="text-[9px] font-black uppercase tracking-widest opacity-20 group-hover:opacity-100 transition-opacity">
+                                                    ID: {entry.id.substring(0,8)}
+                                                </div>
+                                                <div className="text-[9px] font-black uppercase tracking-widest opacity-20 group-hover:opacity-100 transition-opacity">
+                                                    {entry.timestamp?.toDate().toLocaleDateString('de-DE')}
+                                                </div>
+                                            </div>
+                                            <h3 className="text-2xl font-black uppercase italic mb-4 text-orange-500 tracking-tighter leading-none">{entry.title}</h3>
+                                            <p className="text-slate-400 text-sm leading-relaxed line-clamp-6 mb-4">{entry.content}</p>
+                                        </div>
+                                    ))
+                                )}
                             </div>
                         )}
+                    </main>
 
-                        <div className="glass p-8 rounded-[2rem] border-orange-500/20 mb-12 orange-glow">
-                            <input 
-                                className="w-full bg-black/40 border border-slate-800 p-4 rounded-xl mb-4 outline-none focus:border-orange-500 font-bold"
-                                placeholder="PROTOKOLL TITEL"
-                                value={input.title}
-                                onChange={e => setInput({...input, title: e.target.value})}
-                            />
-                            <textarea 
-                                className="w-full bg-black/40 border border-slate-800 p-4 rounded-xl h-32 mb-4 outline-none focus:border-orange-500 resize-none"
-                                placeholder="INHALT DER EMERGENZ..."
-                                value={input.content}
-                                onChange={e => setInput({...input, content: e.target.value})}
-                            />
-                            <button 
-                                onClick={handleSave}
-                                className="bg-orange-600 w-full py-4 rounded-xl font-black uppercase tracking-widest hover:bg-orange-500 transition-all shadow-lg"
-                            >
-                                In Cloud sichern
-                            </button>
-                        </div>
-
-                        <div className="space-y-6">
-                            {entries.map(item => (
-                                <div key={item.id} className="glass p-6 rounded-3xl border-slate-800/50 hover:border-orange-500/30 transition-all">
-                                    <div className="flex justify-between items-center mb-4 opacity-30 text-[9px] font-black uppercase tracking-widest">
-                                        <span>Protokoll-ID: {item.id.substring(0,8)}</span>
-                                        <span>{item.timestamp?.toDate().toLocaleString() || 'Sync...'}</span>
-                                    </div>
-                                    <h3 className="text-2xl font-black uppercase italic mb-3 text-orange-500">{item.title}</h3>
-                                    <p className="text-slate-300 leading-relaxed">{item.content}</p>
-                                </div>
-                            ))}
-                        </div>
-                        
-                        <footer className="mt-20 text-center opacity-10 text-[9px] font-black uppercase tracking-[1em]">
+                    <footer className="max-w-5xl mx-auto mt-24 py-12 border-t border-white/5 text-center">
+                        <p className="text-[10px] font-black uppercase tracking-[1.2em] opacity-10 animate-pulse-slow">
                             Igel Füchsin Blindschleiche aus Licht
-                        </footer>
-                    </div>
+                        </p>
+                    </footer>
                 </div>
             );
         };
