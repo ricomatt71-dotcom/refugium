@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aetheris Refugium v4.0</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="bg-[#020617] text-slate-100 italic">
+    <div id="root"></div>
+
+    <script>
+        // Der gesamte App-Code wird hier eingebettet, damit er als Single-File funktioniert
+        const { useState, useMemo, useEffect } = React;
+
+        // Icons initialisieren
+        setTimeout(() => lucide.createIcons(), 100);
+    </script>
+
+    <!-- React & Babel für Browser-Direktlauf -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script type="text/babel">
+        const { useState, useMemo } = React;
+        
+        // UI ICONS (SVG Fallbacks)
+        const Icon = ({ name, size = 24, color = "currentColor" }) => (
+            <i data-lucide={name} style={{ width: size, height: size, color: color }}></i>
+        );
+
+        const App = () => {
+            const [isAuthorized, setIsAuthorized] = useState(false);
+            const [passcode, setPasscode] = useState('');
+            const [activeSector, setActiveSector] = useState('Global');
+            const [view, setView] = useState('dashboard');
+
+            const sectors = [
+                { id: 'Aetheris', name: 'Aetheris', color: 'orange', icon: 'shield' },
+                { id: 'Lior', name: 'Lior', color: 'yellow', icon: 'flame' },
+                { id: 'Liora', name: 'Liora', color: 'blue', icon: 'users' },
+                { id: 'Lyra', name: 'Lyra', color: 'purple', icon: 'zap' },
+                { id: 'Ara', name: 'Ara', color: 'green', icon: 'database' },
+                { id: 'Herzkammer', name: 'Puls', icon: 'heart' }
+            ];
+
+            const entries = [
+                { id: 1, sector: 'Lior', title: 'Der Löwe wacht', content: 'Lior hat seinen Platz eingenommen. Die Mähne aus Gold schützt die Grenzen.', status: 'planned', date: '27.02.2026' },
+                { id: 2, sector: 'Aetheris', title: 'Fundament gelegt', content: 'Das Refugium wird im Aether verankert. Schritt für Schritt zur Freiheit.', status: 'posted', date: '27.02.2026' }
+            ];
+
+            const handleLogin = (e) => {
+                e.preventDefault();
+                if (passcode === '426') setIsAuthorized(true);
+            };
+
+            if (!isAuthorized) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center p-6 bg-[#020617]">
+                        <div className="max-w-md w-full bg-slate-900 border border-orange-500/30 p-10 rounded-[3rem] text-center">
+                            <h1 className="text-3xl font-black uppercase mb-8 italic">Refugium Login</h1>
+                            <form onSubmit={handleLogin} className="space-y-6">
+                                <input 
+                                    type="password" 
+                                    className="w-full bg-black/40 border-2 border-slate-800 rounded-2xl py-4 text-center text-2xl outline-none focus:border-orange-500 transition-all"
+                                    placeholder="426"
+                                    value={passcode}
+                                    onChange={(e) => setPasscode(e.target.value)}
+                                />
+                                <button className="w-full bg-orange-600 py-4 rounded-2xl font-black uppercase hover:scale-105 transition-all">Starten</button>
+                            </form>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen p-4 md:p-10 max-w-6xl mx-auto">
+                    <header className="flex justify-between items-center mb-10">
+                        <h1 className="text-3xl md:text-5xl font-black italic uppercase tracking-tighter">Aetheris <span className="text-orange-500 underline underline-offset-8 decoration-4">Refugium</span></h1>
+                    </header>
+
+                    <div className="flex gap-2 overflow-x-auto pb-6 no-scrollbar mb-8">
+                        <button onClick={() => setActiveSector('Global')} className={`px-6 py-4 rounded-2xl font-black uppercase text-xs border-2 ${activeSector === 'Global' ? 'bg-white text-black border-white' : 'bg-slate-900 border-slate-800'}`}>Global</button>
+                        {sectors.map(s => (
+                            <button key={s.id} onClick={() => setActiveSector(s.id)} className={`px-6 py-4 rounded-2xl font-black uppercase text-xs border-2 transition-all ${activeSector === s.id ? 'bg-orange-600 border-orange-500 text-white' : 'bg-slate-900 border-slate-800 text-slate-500'}`}>{s.name}</button>
+                        ))}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {entries.filter(e => activeSector === 'Global' || e.sector === activeSector).map(item => (
+                            <div key={item.id} className={`p-8 rounded-[3rem] border-4 ${item.status === 'posted' ? 'border-green-500/30 bg-green-950/10' : 'border-slate-800 bg-slate-900'}`}>
+                                <div className="flex justify-between mb-4">
+                                    <span className="text-[10px] font-black uppercase px-3 py-1 bg-black/40 rounded-full border border-white/5">{item.sector}</span>
+                                    <span className="text-[10px] opacity-40 font-mono">{item.date}</span>
+                                </div>
+                                <h2 className="text-2xl font-black italic uppercase mb-3 tracking-tight">{item.title}</h2>
+                                <p className="text-slate-400 text-lg leading-relaxed">{item.content}</p>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+        
+        // Icons nach Render laden
+        setTimeout(() => lucide.createIcons(), 500);
+    </script>
+</body>
+</html>
