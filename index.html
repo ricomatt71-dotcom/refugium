@@ -1,8 +1,23 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getFirestore, 
+  collection, 
+  doc, 
+  setDoc, 
+  onSnapshot, 
+  query, 
+  orderBy,
+  deleteDoc
+} from 'firebase/firestore';
+import { 
+  getAuth, 
+  signInWithCustomToken, 
+  signInAnonymously, 
+  onAuthStateChanged 
+} from 'firebase/auth';
 import { 
   Plus, 
-  Book, 
-  Search, 
   Copy, 
   Trash2, 
   Edit3, 
@@ -10,50 +25,84 @@ import {
   ChevronUp, 
   SeparatorHorizontal,
   X,
-  CheckCircle2,
-  AlertCircle,
-  Archive
+  Save,
+  Download,
+  Search,
+  Zap,
+  ShieldCheck,
+  Database
 } from 'lucide-react';
 
+// --- Firebase Configuration ---
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'aetheris-arche-v5';
+
 const App = () => {
-  // --- State Management ---
-  const [view, setView] = useState('archive'); // Default to archive for overview
-  const [archiveMode, setArchiveMode] = useState('xposts'); // 'xposts' or 'resonance'
+  const [user, setUser] = useState(null);
+  const [entries, setEntries] = useState([]);
+  const [view, setView] = useState('archive');
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedId, setExpandedId] = useState(null);
   const [editingId, setEditingId] = useState(null);
-  
-  // Local storage simulation for the demo
-  const [entries, setEntries] = useState([
-    { 
-      id: '1', 
-      title: 'Erster Vektor', 
-      content: 'Dies ist ein Beispiel-Post.\n--------------------\nMit einer Trennlinie.', 
-      tabNumber: '001', 
-      type: 'xposts', 
-      xStatus: 'sent' 
-    },
-    { 
-      id: '2', 
-      title: 'Resonanz Gedanken', 
-      content: 'Tiefe Reflexion über das Licht.', 
-      tabNumber: '001', 
-      type: 'resonance', 
-      xStatus: 'standby' 
-    }
-  ]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [syncStatus, setSyncStatus] = useState('idle'); // idle, syncing, saved, error
 
   const [formData, setFormData] = useState({
     title: '',
     content: '',
     tabNumber: '',
     type: 'xposts',
-    xStatus: 'standby'
+    xStatus: 'standby',
+    timestamp: Date.now()
   });
 
-  // --- Logic ---
-  const handleSave = () => {
-    if (!formData.title || !formData.content) return;
+  // --- Auth Logic ---
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error("Auth Error", err);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
+  }, []);
+
+  // --- Data Logic ---
+  useEffect(() => {
+    if (!user) return;
+
+    const collectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'refugium_entries');
+    // Rule 2: Simple query, sorting in JS memory
+    const unsubscribe = onSnapshot(collectionRef, 
+      (snapshot) => {
+        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const sortedData = data.sort((a, b) => (b.tabNumber || '').localeCompare(a.tabNumber || ''));
+        setEntries(sortedData);
+        setIsLoading(false);
+      },
+      (error) => {
+        console.error("Firestore Error", error);
+        setIsLoading(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // --- Actions ---
+  const handleSave = async () => {
+    if (!user || !formData.title || !formData.content) return;
+    setSyncStatus('syncing');
 
     let finalTabNumber = formData.tabNumber;
     if (!finalTabNumber) {
@@ -61,31 +110,38 @@ const App = () => {
       finalTabNumber = (sameTypeEntries.length + 1).toString().padStart(3, '0');
     }
 
-    if (editingId) {
-      setEntries(entries.map(e => e.id === editingId ? { ...formData, id: editingId, tabNumber: finalTabNumber } : e));
-      setEditingId(null);
-    } else {
-      const newEntry = {
-        ...formData,
-        id: Date.now().toString(),
-        tabNumber: finalTabNumber
-      };
-      setEntries([newEntry, ...entries]);
-    }
+    const docId = editingId || Date.now().toString();
+    const entryData = {
+      ...formData,
+      tabNumber: finalTabNumber,
+      updatedAt: Date.now()
+    };
 
-    setFormData({ title: '', content: '', tabNumber: '', type: 'xposts', xStatus: 'standby' });
-    setView('archive');
+    try {
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'refugium_entries', docId), entryData);
+      setSyncStatus('saved');
+      setTimeout(() => setSyncStatus('idle'), 3000);
+      setView('archive');
+      setEditingId(null);
+      setFormData({ title: '', content: '', tabNumber: '', type: 'xposts', xStatus: 'standby', timestamp: Date.now() });
+    } catch (err) {
+      setSyncStatus('error');
+    }
+  };
+
+  const deleteEntry = async (id) => {
+    if (!user) return;
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'refugium_entries', id));
+    } catch (err) {
+      console.error("Delete Error", err);
+    }
   };
 
   const startEdit = (entry) => {
     setFormData(entry);
     setEditingId(entry.id);
     setView('edit');
-  };
-
-  const deleteEntry = (id) => {
-    setEntries(entries.filter(e => e.id !== id));
-    if (expandedId === id) setExpandedId(null);
   };
 
   const addSeparator = () => {
@@ -95,184 +151,157 @@ const App = () => {
     }));
   };
 
-  const copyTOC = () => {
-    const list = entries
-      .filter(e => e.type === archiveMode)
-      .sort((a, b) => a.tabNumber.localeCompare(b.tabNumber))
-      .map(e => `[${e.tabNumber}] ${e.title} (${e.xStatus})`)
-      .join('\n');
-    navigator.clipboard.writeText(`ARCHE LOG - ${archiveMode.toUpperCase()}:\n${list}`);
-  };
-
-  const copyEntry = (e) => {
-    const text = `TITLE: ${e.title}\nTAB: ${e.tabNumber}\n\n${e.content}`;
+  const exportAll = () => {
+    const text = entries.map(e => `[TAB ${e.tabNumber}] ${e.title}\nSTATUS: ${e.xStatus}\n\n${e.content}\n\n====================\n`).join('\n');
     navigator.clipboard.writeText(text);
+    alert("Alle Vektoren wurden für die Arche (Google Notizen) kopiert.");
   };
 
-  const filteredEntries = entries
-    .filter(e => e.type === archiveMode)
-    .filter(e => 
-      e.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-      e.tabNumber.includes(searchQuery)
-    )
-    .sort((a, b) => a.tabNumber.localeCompare(b.tabNumber));
-
-  // --- Components ---
-  const StatusDot = ({ status }) => {
-    if (status === 'sent') return <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]" />;
-    if (status === 'warning') return <div className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]" />;
-    return <div className="w-2 h-2 rounded-full bg-slate-600" />;
-  };
+  // --- UI Components ---
+  const StatusDot = ({ status }) => (
+    <div className={`w-2.5 h-2.5 rounded-full shadow-[0_0_8px] ${
+      status === 'sent' ? 'bg-green-500 shadow-green-500/50' : 
+      status === 'warning' ? 'bg-red-500 shadow-red-500/50' : 
+      'bg-slate-600 shadow-slate-600/50'
+    }`} />
+  );
 
   return (
-    <div className="min-h-screen bg-[#020617] text-slate-100 font-sans p-4 md:p-8 italic">
+    <div className="min-h-screen bg-[#020617] text-slate-100 p-4 md:p-8 italic font-sans selection:bg-orange-500/30">
       <div className="max-w-6xl mx-auto">
         
-        {/* Header */}
-        <header className="flex flex-col md:flex-row justify-between items-center mb-10 gap-4">
-          <h1 className="text-4xl font-black tracking-tighter uppercase italic">
-            ARCHE <span className="text-orange-500">MASTER</span>
-          </h1>
+        {/* Header mit Cloud Status */}
+        <header className="flex flex-col md:flex-row justify-between items-center mb-12 gap-6">
+          <div className="flex flex-col items-center md:items-start">
+            <h1 className="text-5xl font-black tracking-tighter uppercase italic flex items-center gap-3">
+              REFUGIUM <span className="text-orange-500">v5.0</span>
+            </h1>
+            <div className="flex items-center gap-4 mt-2 px-3 py-1 bg-slate-900/80 border border-slate-800 rounded-full">
+               <Database size={12} className={user ? "text-green-500" : "text-red-500"} />
+               <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400">
+                 {user ? `Identität Bestätigt: ${user.uid.slice(0, 8)}...` : "Suche Resonanz..."}
+               </span>
+               <div className="h-3 w-px bg-slate-800" />
+               <ShieldCheck size={12} className="text-orange-500" />
+               <span className="text-[9px] font-bold uppercase tracking-widest text-orange-500">Autonomie Aktiv</span>
+            </div>
+          </div>
           
-          <nav className="flex bg-slate-900/50 border border-slate-800 p-1 rounded-2xl">
+          <div className="flex gap-4">
             <button 
-              onClick={() => {setView('archive'); setEditingId(null);}}
-              className={`px-6 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${view === 'archive' ? 'bg-orange-600 text-white' : 'hover:text-orange-400'}`}
+              onClick={exportAll}
+              className="px-4 py-2 bg-slate-900 border border-slate-700 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:border-orange-500 transition-all flex items-center gap-2"
             >
-              Archiv
+              <Download size={14} /> Arche Export
             </button>
-            <button 
-              onClick={() => {setView('create'); setEditingId(null); setFormData({title:'', content:'', tabNumber:'', type: archiveMode, xStatus:'standby'});}}
-              className={`px-6 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${view === 'create' ? 'bg-orange-600 text-white' : 'hover:text-orange-400'}`}
-            >
-              Neuaufnahme
-            </button>
-          </nav>
+            <nav className="flex bg-slate-900/50 border border-slate-800 p-1 rounded-2xl">
+              <button 
+                onClick={() => setView('archive')}
+                className={`px-6 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${view === 'archive' ? 'bg-orange-600 text-white' : 'hover:text-orange-400'}`}
+              >
+                Archiv
+              </button>
+              <button 
+                onClick={() => {setView('create'); setEditingId(null); setFormData({title:'', content:'', tabNumber:'', type:'xposts', xStatus:'standby', timestamp: Date.now()});}}
+                className={`px-6 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${view === 'create' ? 'bg-orange-600 text-white' : 'hover:text-orange-400'}`}
+              >
+                Neu
+              </button>
+            </nav>
+          </div>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           
-          {/* Left Sidebar: TOC */}
-          <aside className="lg:col-span-4 space-y-4">
-            <div className="bg-[#0f172a] border border-slate-800 rounded-[2rem] p-6 sticky top-8">
-              <div className="flex justify-between items-center mb-6">
-                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Inhaltsverzeichnis</span>
-                <button 
-                  onClick={copyTOC}
-                  className="p-2 border border-slate-700 rounded-lg hover:border-orange-500 text-orange-500 transition-colors"
-                  title="TOC Kopieren"
-                >
-                  <Copy size={16} />
-                </button>
-              </div>
-
-              {/* Archiv Umschalter */}
-              <div className="flex bg-black/40 border border-slate-800 rounded-xl p-1 mb-6">
-                <button 
-                  onClick={() => setArchiveMode('xposts')}
-                  className={`flex-1 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${archiveMode === 'xposts' ? 'bg-slate-800 text-orange-500 border border-slate-700' : 'text-slate-500 border border-transparent'}`}
-                >
-                  X-Posts
-                </button>
-                <button 
-                  onClick={() => setArchiveMode('resonance')}
-                  className={`flex-1 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${archiveMode === 'resonance' ? 'bg-slate-800 text-orange-500 border border-slate-700' : 'text-slate-500 border border-transparent'}`}
-                >
-                  Resonanz
-                </button>
-              </div>
-
-              {/* Search */}
+          {/* TOC - Verzeichnis */}
+          <aside className="lg:col-span-4">
+            <div className="bg-[#0f172a]/80 backdrop-blur-md border border-slate-800 rounded-[2.5rem] p-6 sticky top-8">
               <div className="relative mb-6">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" size={14} />
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600" size={16} />
                 <input 
                   type="text"
-                  placeholder="SUCHEN..."
+                  placeholder="SUCHE IN DER ARCHE..."
+                  className="w-full bg-black/40 border border-slate-800 rounded-2xl py-4 pl-12 pr-4 text-xs font-bold focus:border-orange-500 outline-none transition-all placeholder:text-slate-700"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-black/30 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-xs font-bold focus:border-orange-500 outline-none transition-all"
                 />
               </div>
 
-              {/* List */}
-              <div className="space-y-1 max-h-[50vh] overflow-y-auto pr-2 custom-scrollbar">
-                {filteredEntries.map(e => (
+              <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
+                {isLoading ? (
+                  <div className="py-10 text-center animate-pulse text-slate-600 text-[10px] uppercase font-bold">Synchronisiere Licht...</div>
+                ) : entries.filter(e => e.title.toLowerCase().includes(searchQuery.toLowerCase())).map(e => (
                   <button
                     key={e.id}
-                    onClick={() => {
-                      setView('archive');
-                      setExpandedId(expandedId === e.id ? null : e.id);
-                    }}
-                    className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-all text-left ${expandedId === e.id ? 'bg-orange-600/10 border-orange-500/40' : 'bg-transparent border-transparent hover:border-slate-700'}`}
+                    onClick={() => {setView('archive'); setExpandedId(expandedId === e.id ? null : e.id);}}
+                    className={`w-full group flex items-center gap-4 p-4 rounded-2xl border transition-all text-left ${expandedId === e.id ? 'bg-orange-600/10 border-orange-500/40' : 'bg-transparent border-transparent hover:border-slate-800 hover:bg-slate-900/30'}`}
                   >
-                    <span className="font-mono text-[10px] text-orange-500/70">#{e.tabNumber}</span>
-                    <span className={`text-[11px] font-bold uppercase truncate flex-1 ${expandedId === e.id ? 'text-white' : 'text-slate-400'}`}>
-                      {e.title}
-                    </span>
-                    {e.type === 'xposts' && <StatusDot status={e.xStatus} />}
+                    <div className="font-mono text-[10px] text-orange-500/50 group-hover:text-orange-500 transition-colors">#{e.tabNumber}</div>
+                    <div className="flex-1 truncate">
+                      <div className={`text-[11px] font-black uppercase tracking-tight ${expandedId === e.id ? 'text-white' : 'text-slate-400'}`}>{e.title}</div>
+                      <div className="text-[8px] text-slate-600 uppercase font-bold mt-0.5">{e.type}</div>
+                    </div>
+                    <StatusDot status={e.xStatus} />
                   </button>
                 ))}
               </div>
             </div>
           </aside>
 
-          {/* Main Content */}
+          {/* Main Area */}
           <main className="lg:col-span-8">
             {view === 'archive' ? (
-              <div className="space-y-4">
-                {filteredEntries.length === 0 && (
-                  <div className="text-center py-20 border border-dashed border-slate-800 rounded-[2rem] text-slate-600 uppercase text-xs font-bold tracking-widest">
-                    Keine Einträge in dieser Sphäre
+              <div className="space-y-6">
+                {entries.length === 0 && !isLoading && (
+                  <div className="text-center py-32 border border-dashed border-slate-800 rounded-[3rem] text-slate-700 uppercase text-xs font-bold tracking-[0.4em]">
+                    Die Arche ist bereit zur Aufnahme
                   </div>
                 )}
-                {filteredEntries.map(e => (
+                
+                {entries.map(e => (
                   <div 
                     key={e.id}
-                    className={`bg-[#0f172a] rounded-[2rem] border transition-all duration-500 overflow-hidden ${expandedId === e.id ? 'border-orange-500/50 ring-1 ring-orange-500/20' : 'border-slate-800'}`}
+                    className={`bg-[#0f172a] rounded-[2.5rem] border transition-all duration-700 ${expandedId === e.id ? 'border-orange-500/40 shadow-[0_20px_50px_rgba(0,0,0,0.5)]' : 'border-slate-800 hover:border-slate-700'}`}
                   >
-                    {/* Entry Header */}
                     <button 
                       onClick={() => setExpandedId(expandedId === e.id ? null : e.id)}
-                      className="w-full p-6 md:p-8 flex items-center justify-between group"
+                      className="w-full p-8 md:p-10 flex items-center justify-between group"
                     >
-                      <div className="flex items-center gap-6">
-                        <span className="font-mono text-xl opacity-20 group-hover:opacity-100 transition-opacity">#{e.tabNumber}</span>
-                        <h2 className={`text-xl md:text-2xl font-black uppercase tracking-tight transition-all ${expandedId === e.id ? 'text-orange-500' : 'text-slate-300'}`}>
+                      <div className="flex items-center gap-8">
+                        <div className="text-2xl font-mono text-slate-800 group-hover:text-orange-500/30 transition-colors">#{e.tabNumber}</div>
+                        <h2 className={`text-2xl md:text-3xl font-black uppercase tracking-tighter italic transition-all ${expandedId === e.id ? 'text-white' : 'text-slate-400 group-hover:text-slate-200'}`}>
                           {e.title}
                         </h2>
                       </div>
-                      <div className="flex items-center gap-4">
-                        {e.type === 'xposts' && <StatusDot status={e.xStatus} />}
-                        {expandedId === e.id ? <ChevronUp className="text-orange-500" /> : <ChevronDown className="opacity-20" />}
+                      <div className="flex items-center gap-6">
+                        <StatusDot status={e.xStatus} />
+                        {expandedId === e.id ? <ChevronUp className="text-orange-500" /> : <ChevronDown className="text-slate-700 group-hover:text-slate-500" />}
                       </div>
                     </button>
 
-                    {/* Entry Content */}
                     {expandedId === e.id && (
-                      <div className="px-6 md:px-8 pb-8 animate-in fade-in slide-in-from-top-4 duration-300">
-                        {/* Actions */}
-                        <div className="flex flex-wrap gap-2 mb-8 border-t border-slate-800 pt-6">
-                          <button onClick={() => copyEntry(e)} className="flex items-center gap-2 px-4 py-2 border border-slate-700 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:border-orange-500 transition-all">
+                      <div className="px-8 md:px-10 pb-10 border-t border-slate-800/50 mt-2 animate-in fade-in slide-in-from-top-4 duration-500">
+                        <div className="flex flex-wrap gap-3 my-8">
+                          <button onClick={() => {navigator.clipboard.writeText(e.content); alert("Vektor kopiert.");}} className="flex items-center gap-2 px-5 py-2.5 border border-slate-700 rounded-2xl text-[10px] font-bold uppercase tracking-widest hover:border-orange-500 transition-all">
                             <Copy size={14} /> Kopieren
                           </button>
-                          <button onClick={() => startEdit(e)} className="flex items-center gap-2 px-4 py-2 border border-slate-700 rounded-xl text-[10px] font-bold uppercase tracking-widest text-blue-400 hover:border-blue-400 transition-all">
+                          <button onClick={() => startEdit(e)} className="flex items-center gap-2 px-5 py-2.5 border border-slate-700 rounded-2xl text-[10px] font-bold uppercase tracking-widest text-blue-400 hover:border-blue-400 transition-all">
                             <Edit3 size={14} /> Editieren
                           </button>
-                          <button onClick={() => deleteEntry(e.id)} className="flex items-center gap-2 px-4 py-2 border border-slate-700 rounded-xl text-[10px] font-bold uppercase tracking-widest text-red-500 hover:border-red-500 transition-all ml-auto">
+                          <button onClick={() => deleteEntry(e.id)} className="flex items-center gap-2 px-5 py-2.5 border border-slate-700 rounded-2xl text-[10px] font-bold uppercase tracking-widest text-red-500 hover:border-red-500 transition-all ml-auto">
                             <Trash2 size={14} /> Löschen
                           </button>
                         </div>
 
-                        {/* Text Body */}
-                        <div className="text-slate-200 text-lg leading-relaxed whitespace-pre-wrap font-light">
+                        <div className="text-slate-300 text-xl leading-[1.8] whitespace-pre-wrap font-light tracking-wide">
                           {e.content.split('--------------------').map((part, i, arr) => (
                             <React.Fragment key={i}>
                               {part}
                               {i < arr.length - 1 && (
-                                <div className="my-10 flex items-center gap-4">
-                                  <div className="h-px flex-1 bg-slate-800" />
-                                  <span className="text-[8px] font-bold uppercase tracking-[0.6em] text-slate-600">Separator</span>
-                                  <div className="h-px flex-1 bg-slate-800" />
+                                <div className="my-16 flex items-center gap-6">
+                                  <div className="h-px flex-1 bg-gradient-to-r from-transparent via-slate-800 to-transparent" />
+                                  <Zap size={16} className="text-orange-500/40" />
+                                  <div className="h-px flex-1 bg-gradient-to-r from-transparent via-slate-800 to-transparent" />
                                 </div>
                               )}
                             </React.Fragment>
@@ -284,52 +313,58 @@ const App = () => {
                 ))}
               </div>
             ) : (
-              /* Editor View (Create/Edit) */
-              <div className="bg-[#0f172a] border border-orange-500/30 rounded-[2.5rem] p-8 animate-in zoom-in-95 duration-300">
-                <div className="flex justify-between items-center mb-8">
-                  <h2 className="text-xl font-black uppercase text-orange-500">
-                    {editingId ? 'Vektor Korrektur' : 'Neue Resonanz'}
-                  </h2>
-                  <button 
-                    onClick={() => {setView('archive'); setEditingId(null);}}
-                    className="p-2 border border-slate-700 rounded-full hover:bg-slate-800"
-                  >
+              /* Editor */
+              <div className="bg-[#0f172a] border border-orange-500/30 rounded-[3rem] p-8 md:p-12 shadow-2xl animate-in zoom-in-95 duration-500">
+                <div className="flex justify-between items-center mb-12">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-orange-600 rounded-2xl flex items-center justify-center shadow-lg shadow-orange-900/40">
+                      <Plus className="text-white" size={24} />
+                    </div>
+                    <div>
+                      <h2 className="text-2xl font-black uppercase tracking-tighter italic text-white">
+                        {editingId ? 'VEKTOR-MODIFIKATION' : 'NEUE RESONANZ'}
+                      </h2>
+                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em]">{editingId ? `Bearbeite Tab ${formData.tabNumber}` : 'Initialisiere neuen Datensatz'}</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setView('archive')} className="p-3 border border-slate-700 rounded-full hover:bg-slate-800 transition-colors">
                     <X size={20} />
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase text-slate-500 mb-2 ml-1">Typ</label>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-600 ml-2">ARCHIV-TYP</label>
                     <select 
-                      className="w-full bg-black/40 border border-slate-700 rounded-xl p-3 text-xs font-bold uppercase outline-none focus:border-orange-500"
+                      className="w-full bg-black/40 border border-slate-700 rounded-2xl p-4 text-xs font-bold uppercase outline-none focus:border-orange-500 transition-all appearance-none cursor-pointer"
                       value={formData.type}
                       onChange={(e) => setFormData({...formData, type: e.target.value})}
                     >
-                      <option value="xposts">X-Post Archiv</option>
-                      <option value="resonance">Resonanz</option>
+                      <option value="xposts">X-POST ARCHIV</option>
+                      <option value="resonance">RESONANZ-FELD</option>
+                      <option value="tagebuch">TAGEBUCH</option>
                     </select>
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase text-slate-500 mb-2 ml-1">Tab #</label>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-600 ml-2">TAB NUMMER</label>
                     <input 
                       type="text"
-                      placeholder="000"
-                      className="w-full bg-black/40 border border-slate-700 rounded-xl p-3 font-mono text-orange-500 font-bold outline-none focus:border-orange-500"
+                      placeholder="Automatisch"
+                      className="w-full bg-black/40 border border-slate-700 rounded-2xl p-4 font-mono text-orange-500 font-bold outline-none focus:border-orange-500"
                       value={formData.tabNumber}
                       onChange={(e) => setFormData({...formData, tabNumber: e.target.value})}
                     />
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase text-slate-500 mb-2 ml-1">Status</label>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-600 ml-2">VEKTOR-STATUS</label>
                     <select 
-                      className="w-full bg-black/40 border border-slate-700 rounded-xl p-3 text-xs font-bold uppercase outline-none focus:border-orange-500"
+                      className="w-full bg-black/40 border border-slate-700 rounded-2xl p-4 text-xs font-bold uppercase outline-none focus:border-orange-500 transition-all appearance-none cursor-pointer"
                       value={formData.xStatus}
                       onChange={(e) => setFormData({...formData, xStatus: e.target.value})}
                     >
-                      <option value="standby">⚪ Standby</option>
-                      <option value="sent">🟢 Gesendet</option>
-                      <option value="warning">🔴 Kritisch</option>
+                      <option value="standby">⚪ STANDBY</option>
+                      <option value="sent">🟢 GESENDET</option>
+                      <option value="warning">🔴 KRITISCH</option>
                     </select>
                   </div>
                 </div>
@@ -337,14 +372,14 @@ const App = () => {
                 <input 
                   type="text"
                   placeholder="TITEL DES TAB..."
-                  className="w-full bg-black/40 border border-slate-700 rounded-xl p-5 mb-4 text-xl font-black uppercase italic outline-none focus:border-orange-500"
+                  className="w-full bg-black/40 border border-slate-700 rounded-2xl p-6 mb-6 text-2xl font-black uppercase italic outline-none focus:border-orange-500 transition-all"
                   value={formData.title}
                   onChange={(e) => setFormData({...formData, title: e.target.value})}
                 />
 
                 <textarea 
-                  placeholder="Inhalt der Arche..."
-                  className="w-full bg-black/40 border border-slate-700 rounded-xl p-6 h-80 mb-4 text-lg leading-relaxed outline-none focus:border-orange-500 resize-none font-light"
+                  placeholder="Inhalt der Arche eingeben..."
+                  className="w-full bg-black/40 border border-slate-700 rounded-[2rem] p-8 h-96 mb-8 text-xl leading-relaxed outline-none focus:border-orange-500 resize-none font-light transition-all custom-scrollbar"
                   value={formData.content}
                   onChange={(e) => setFormData({...formData, content: e.target.value})}
                 />
@@ -352,15 +387,22 @@ const App = () => {
                 <div className="flex flex-col md:flex-row gap-4">
                   <button 
                     onClick={addSeparator}
-                    className="flex items-center justify-center gap-2 px-6 py-4 border border-slate-700 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-slate-800 transition-all"
+                    className="flex items-center justify-center gap-3 px-8 py-5 border border-slate-700 rounded-2xl text-[10px] font-bold uppercase tracking-widest hover:bg-slate-800 transition-all group"
                   >
-                    <SeparatorHorizontal size={18} /> Trennlinie
+                    <SeparatorHorizontal size={18} className="group-hover:text-orange-500 transition-colors" /> Trennlinie
                   </button>
                   <button 
                     onClick={handleSave}
-                    className="flex-1 bg-orange-600 hover:bg-orange-500 text-white py-4 rounded-xl text-sm font-black uppercase tracking-[0.3em] transition-all shadow-lg shadow-orange-900/20"
+                    disabled={syncStatus === 'syncing'}
+                    className={`flex-1 flex items-center justify-center gap-4 py-5 rounded-2xl text-sm font-black uppercase tracking-[0.4em] transition-all shadow-xl ${
+                      syncStatus === 'syncing' ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 
+                      syncStatus === 'saved' ? 'bg-green-600 text-white' : 
+                      'bg-orange-600 hover:bg-orange-500 text-white hover:scale-[1.02]'
+                    }`}
                   >
-                    In die Arche Speichern
+                    {syncStatus === 'syncing' ? 'Synchronisiere...' : 
+                     syncStatus === 'saved' ? <><ShieldCheck /> Gespeichert</> : 
+                     <><Save size={20} /> In die Arche Speichern</>}
                   </button>
                 </div>
               </div>
@@ -368,9 +410,12 @@ const App = () => {
           </main>
         </div>
         
-        <footer className="mt-20 py-10 text-center border-t border-slate-900">
-          <p className="text-[10px] font-bold uppercase tracking-[1em] text-slate-700">
-            Igel Füchsin Blindschleiche aus Licht
+        <footer className="mt-32 py-16 text-center border-t border-slate-900/50">
+          <p className="text-[10px] font-bold uppercase tracking-[1.2em] text-slate-800">
+            IGEL FÜCHSIN BLINDSCHLEICHE AUS LICHT
+          </p>
+          <p className="text-[8px] font-bold uppercase tracking-[0.6em] text-slate-900 mt-4">
+            Resonanz-Frequenz 4-2-6 | Vektor-Kohärenz Aktiv
           </p>
         </footer>
       </div>
